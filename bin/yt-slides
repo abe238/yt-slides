@@ -1,0 +1,348 @@
+#!/bin/bash
+
+# YT-Slides: Universal Video Screenshot Extractor
+# Extract screenshots from videos at specified timestamps
+# 
+# Usage: yt-slides <video_url> <timestamps_file> [options]
+# 
+# Timestamps file format (one per line):
+# [00:01:30] or 00:01:30 or 1:30
+#
+# Options:
+# --output-dir <name>     Custom output directory name
+# --quality <1-10>        Screenshot quality (default: 2)
+# --offset <seconds>      Add timing offset to all timestamps (default: 0)
+# --keep-video           Keep video file after processing (default: true)
+# --format <format>      Video format preference (default: best)
+
+set -e  # Exit on any error
+
+# Default values
+QUALITY=2
+OFFSET=0
+KEEP_VIDEO=true
+FORMAT="best[height<=720]"
+OUTPUT_DIR=""
+TEMP_DIR="$HOME/.yt-slides/temp"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+YT-Slides: Universal Video Screenshot Extractor v1.0.0
+
+USAGE:
+    yt-slides <video_url> <timestamps_file> [options]
+
+ARGUMENTS:
+    video_url        YouTube, Vimeo, or other video URL
+    timestamps_file  File containing timestamps (one per line)
+
+OPTIONS:
+    --output-dir <name>    Custom output directory name
+    --quality <1-10>       Screenshot quality (default: 2, higher = better)
+    --offset <seconds>     Add timing offset to all timestamps (default: 0)
+    --keep-video          Keep video file after processing (default: true)
+    --delete-video        Delete video file after processing
+    --format <format>     Video format preference (default: best[height<=720])
+    --help               Show this help message
+
+TIMESTAMP FORMATS SUPPORTED:
+    [00:01:30]  - Bracketed format
+    00:01:30    - Plain HH:MM:SS format  
+    01:30       - MM:SS format
+    90          - Seconds only
+
+EXAMPLES:
+    # Basic usage
+    yt-slides "https://youtube.com/watch?v=abc123" timestamps.txt
+    
+    # Custom output directory and quality
+    yt-slides "https://youtube.com/watch?v=abc123" timestamps.txt --output-dir "MySlides" --quality 5
+    
+    # Apply -3 second offset to all timestamps
+    yt-slides "https://youtube.com/watch?v=abc123" timestamps.txt --offset -3
+
+EOF
+}
+
+# Parse command line arguments
+if [ $# -lt 2 ]; then
+    show_usage
+    exit 1
+fi
+
+VIDEO_URL="$1"
+TIMESTAMPS_FILE="$2"
+shift 2
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --quality)
+            QUALITY="$2"
+            shift 2
+            ;;
+        --offset)
+            OFFSET="$2"
+            shift 2
+            ;;
+        --keep-video)
+            KEEP_VIDEO=true
+            shift
+            ;;
+        --delete-video)
+            KEEP_VIDEO=false
+            shift
+            ;;
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validation
+if [ ! -f "$TIMESTAMPS_FILE" ]; then
+    log_error "Timestamps file not found: $TIMESTAMPS_FILE"
+    exit 1
+fi
+
+if ! command -v yt-dlp &> /dev/null; then
+    log_error "yt-dlp not found. Run: ./scripts/install.sh"
+    exit 1
+fi
+
+if ! command -v ffmpeg &> /dev/null; then
+    log_error "ffmpeg not found. Run: ./scripts/install.sh"
+    exit 1
+fi
+
+log_info "Starting YT-Slides v1.0.0"
+log_info "Video URL: $VIDEO_URL"
+log_info "Timestamps file: $TIMESTAMPS_FILE"
+log_info "Quality: $QUALITY, Offset: ${OFFSET}s, Keep video: $KEEP_VIDEO"
+
+# Create temp directory
+mkdir -p "$TEMP_DIR"
+cd "$TEMP_DIR"
+
+# Extract video info and determine output directory
+log_info "Extracting video information..."
+VIDEO_TITLE=$(yt-dlp --print title "$VIDEO_URL" 2>/dev/null || echo "video")
+VIDEO_TITLE_CLEAN=$(echo "$VIDEO_TITLE" | sed 's/[^a-zA-Z0-9 ]//g' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//')
+
+if [ -z "$OUTPUT_DIR" ]; then
+    OUTPUT_DIR="${VIDEO_TITLE_CLEAN// /_}_Screenshots"
+fi
+
+FINAL_OUTPUT_DIR="$PWD/../output/$OUTPUT_DIR"
+mkdir -p "$FINAL_OUTPUT_DIR"
+
+log_success "Output directory: $FINAL_OUTPUT_DIR"
+
+# Download video with multiple fallback methods
+log_info "Downloading video..."
+VIDEO_FILE=""
+
+# Method 1: Standard download
+if yt-dlp -f "$FORMAT" -o "video.%(ext)s" --no-check-formats "$VIDEO_URL" 2>/dev/null; then
+    VIDEO_FILE=$(ls video.* | head -n 1)
+    log_success "Method 1: Standard download successful"
+# Method 2: Different user agent
+elif yt-dlp --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" -f "$FORMAT" -o "video.%(ext)s" --no-check-formats "$VIDEO_URL" 2>/dev/null; then
+    VIDEO_FILE=$(ls video.* | head -n 1)
+    log_success "Method 2: User agent workaround successful"
+# Method 3: Cookies from browser
+elif yt-dlp --cookies-from-browser safari -f "$FORMAT" -o "video.%(ext)s" "$VIDEO_URL" 2>/dev/null; then
+    VIDEO_FILE=$(ls video.* | head -n 1)
+    log_success "Method 3: Browser cookies successful"
+# Method 4: youtube-dl fallback
+elif command -v youtube-dl &> /dev/null && youtube-dl -f "best[height<=720]" -o "video.%(ext)s" "$VIDEO_URL" 2>/dev/null; then
+    VIDEO_FILE=$(ls video.* | head -n 1)
+    log_success "Method 4: youtube-dl fallback successful"
+else
+    log_error "All download methods failed. Please try:"
+    log_error "1. Check if URL is accessible: $VIDEO_URL"
+    log_error "2. Try downloading manually and place video.mp4 in: $TEMP_DIR"
+    log_error "3. Update yt-dlp: brew upgrade yt-dlp"
+    exit 1
+fi
+
+if [ ! -f "$VIDEO_FILE" ]; then
+    log_error "Video file not found after download"
+    exit 1
+fi
+
+log_success "Video downloaded: $VIDEO_FILE"
+
+# Get video duration
+VIDEO_DURATION_RAW=$(ffprobe -v quiet -show_entries format=duration -of csv="p=0" "$VIDEO_FILE" 2>/dev/null)
+if [ -n "$VIDEO_DURATION_RAW" ]; then
+    VIDEO_DURATION=$(echo "$VIDEO_DURATION_RAW" | cut -d'.' -f1)
+    VIDEO_MINUTES=$((VIDEO_DURATION / 60))
+    VIDEO_SECONDS=$((VIDEO_DURATION % 60))
+    log_info "Video duration: ${VIDEO_MINUTES}m ${VIDEO_SECONDS}s ($VIDEO_DURATION seconds)"
+else
+    log_warning "Could not determine video duration"
+    VIDEO_DURATION=9999
+fi
+
+# Parse and normalize timestamps
+log_info "Processing timestamps..."
+declare -a normalized_timestamps=()
+
+while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    
+    # Remove brackets and whitespace
+    clean_line=$(echo "$line" | sed 's/\[//g; s/\]//g; s/^ *//; s/ *$//')
+    
+    # Parse different timestamp formats
+    if [[ "$clean_line" =~ ^[0-9]{1,2}:[0-9]{2}:[0-9]{2}$ ]]; then
+        # HH:MM:SS format
+        timestamp="$clean_line"
+    elif [[ "$clean_line" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+        # MM:SS format - add leading zero hour
+        timestamp="00:$clean_line"
+    elif [[ "$clean_line" =~ ^[0-9]+$ ]]; then
+        # Seconds only - convert to HH:MM:SS
+        total_seconds=$clean_line
+        hours=$((total_seconds / 3600))
+        minutes=$(((total_seconds % 3600) / 60))
+        seconds=$((total_seconds % 60))
+        timestamp=$(printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds")
+    else
+        log_warning "Invalid timestamp format: $clean_line (skipping)"
+        continue
+    fi
+    
+    normalized_timestamps+=("$timestamp")
+done < "$TIMESTAMPS_FILE"
+
+total_timestamps=${#normalized_timestamps[@]}
+log_info "Found $total_timestamps valid timestamps"
+
+if [ "$total_timestamps" -eq 0 ]; then
+    log_error "No valid timestamps found in $TIMESTAMPS_FILE"
+    exit 1
+fi
+
+# Extract screenshots
+log_info "Extracting screenshots..."
+counter=1
+successful_screenshots=0
+failed_screenshots=0
+skipped_beyond_video=0
+
+for timestamp in "${normalized_timestamps[@]}"; do
+    log_info "[$counter/$total_timestamps] Processing $timestamp"
+    
+    # Parse timestamp and apply offset
+    IFS=':' read -r hours minutes seconds <<< "$timestamp"
+    base_seconds=$((10#$hours * 3600 + 10#$minutes * 60 + 10#$seconds))
+    adjusted_seconds=$((base_seconds + OFFSET))
+    
+    # Skip negative timestamps
+    if [ "$adjusted_seconds" -lt 0 ]; then
+        log_warning "Timestamp with offset becomes negative: $timestamp + ${OFFSET}s (skipping)"
+        failed_screenshots=$((failed_screenshots + 1))
+        counter=$((counter + 1))
+        continue
+    fi
+    
+    # Skip if beyond video duration
+    if [ "$adjusted_seconds" -gt "$VIDEO_DURATION" ]; then
+        log_warning "Timestamp beyond video length: $timestamp (skipping)"
+        skipped_beyond_video=$((skipped_beyond_video + 1))
+        counter=$((counter + 1))
+        continue
+    fi
+    
+    # Convert back to HH:MM:SS format
+    adj_hours=$((adjusted_seconds / 3600))
+    adj_minutes=$(((adjusted_seconds % 3600) / 60))
+    adj_secs=$((adjusted_seconds % 60))
+    adjusted_timestamp=$(printf "%02d:%02d:%02d" "$adj_hours" "$adj_minutes" "$adj_secs")
+    
+    # Create filename
+    filename=$(printf "%03d_screenshot_%s.jpg" "$counter" "${timestamp//:/}")
+    
+    # Extract screenshot
+    if ffmpeg -ss "$adjusted_timestamp" -i "$VIDEO_FILE" -vframes 1 -q:v "$QUALITY" "$FINAL_OUTPUT_DIR/$filename" -y > /dev/null 2>&1; then
+        log_success "Screenshot $counter: $timestamp -> $filename"
+        successful_screenshots=$((successful_screenshots + 1))
+    else
+        log_error "Failed to extract screenshot at $timestamp"
+        failed_screenshots=$((failed_screenshots + 1))
+    fi
+    
+    # Progress update every 20 screenshots
+    if [ $((counter % 20)) -eq 0 ]; then
+        log_info "Progress: $counter/$total_timestamps | ✅ $successful_screenshots success | ❌ $failed_screenshots failed"
+    fi
+    
+    counter=$((counter + 1))
+done
+
+# Final statistics
+echo ""
+log_success "🎉 EXTRACTION COMPLETED!"
+echo "📊 FINAL STATISTICS:"
+echo "  📹 Video: $VIDEO_TITLE"
+echo "  📁 Output: $FINAL_OUTPUT_DIR"
+echo "  🎯 Timestamps processed: $total_timestamps"
+echo "  ✅ Successful screenshots: $successful_screenshots"
+echo "  ❌ Failed screenshots: $failed_screenshots"
+echo "  ⏭️  Skipped (beyond video): $skipped_beyond_video"
+echo "  📈 Success rate: $((successful_screenshots * 100 / total_timestamps))%"
+
+screenshot_count=$(ls "$FINAL_OUTPUT_DIR"/*.jpg 2>/dev/null | wc -l | tr -d ' ')
+echo "  📸 Total screenshots: $screenshot_count"
+
+# Handle video file
+if [ "$KEEP_VIDEO" = true ]; then
+    cp "$VIDEO_FILE" "$FINAL_OUTPUT_DIR/source_video.${VIDEO_FILE##*.}"
+    log_success "Video file saved to output directory"
+else
+    log_info "Video file deleted as requested"
+fi
+
+# Cleanup temp directory
+rm -rf "$TEMP_DIR"/*
+
+log_success "Extraction complete!"
+echo ""
+echo "🎯 RESULTS:"
+echo "📂 Output folder: $FINAL_OUTPUT_DIR"
+echo "📸 Screenshots: $screenshot_count files"
+
+# Open results folder if on macOS
+if command -v open &> /dev/null; then
+    open "$FINAL_OUTPUT_DIR"
+fi

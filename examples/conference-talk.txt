@@ -1,0 +1,20 @@
+# Conference Talk Example - AI Presentation
+# Extracted from a typical tech conference presentation
+# These timestamps capture slide transitions without the speaker
+
+[00:00:10]
+[00:01:18]
+[00:01:33] 
+[00:01:40]
+[00:02:00]
+[00:02:09]
+[00:02:29]
+[00:02:41]
+[00:03:12]
+[00:03:28]
+[00:03:40]
+[00:03:50]
+[00:03:55]
+[00:03:58]
+[00:04:24]
+[00:05:03]

@@ -1,0 +1,24 @@
+# Example timestamps file for YT-Slides
+# Lines starting with # are comments and will be ignored
+# Supported formats:
+
+# Bracketed format (most common for YouTube video descriptions)
+[00:00:10]
+[00:01:18]
+[00:01:33]
+[00:02:00]
+
+# Plain HH:MM:SS format
+00:02:09
+00:02:29
+00:03:12
+
+# MM:SS format (automatically converts to 00:MM:SS)
+03:28
+03:40
+05:15
+
+# Seconds only (automatically converts to HH:MM:SS)
+230
+425
+680
