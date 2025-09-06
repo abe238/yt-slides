@@ -316,7 +316,7 @@ This project was created to solve real-world video processing challenges. Contri
 
 ### Development Setup
 ```bash
-git clone https://github.com/your-username/yt-slides.git
+git clone https://github.com/abe238/yt-slides.git
 cd yt-slides
 ./scripts/install.sh
 ./scripts/test.sh
