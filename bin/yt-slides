@@ -142,6 +142,14 @@ if ! command -v ffmpeg &> /dev/null; then
     exit 1
 fi
 
+# Check yt-dlp version and suggest update if too old
+YTDLP_VERSION=$(yt-dlp --version 2>/dev/null || echo "unknown")
+YTDLP_DATE=${YTDLP_VERSION%%.*}
+if [ "$YTDLP_DATE" -lt "2025" ] 2>/dev/null || [[ "$YTDLP_VERSION" =~ ^2025\.0[1-8] ]]; then
+    log_warning "yt-dlp version $YTDLP_VERSION may be outdated"
+    log_warning "For best YouTube compatibility, update with: pip install --upgrade yt-dlp"
+fi
+
 log_info "Starting YT-Slides v1.0.0"
 log_info "Video URL: $VIDEO_URL"
 log_info "Timestamps file: $TIMESTAMPS_FILE"
@@ -188,8 +196,9 @@ elif command -v youtube-dl &> /dev/null && youtube-dl -f "best[height<=720]" -o 
 else
     log_error "All download methods failed. Please try:"
     log_error "1. Check if URL is accessible: $VIDEO_URL"
-    log_error "2. Try downloading manually and place video.mp4 in: $TEMP_DIR"
-    log_error "3. Update yt-dlp: brew upgrade yt-dlp"
+    log_error "2. Update yt-dlp (often fixes YouTube bot detection): pip install --upgrade yt-dlp"
+    log_error "3. Alternative update method: brew upgrade yt-dlp"
+    log_error "4. Try downloading manually and place video.mp4 in: $TEMP_DIR"
     exit 1
 fi
 
